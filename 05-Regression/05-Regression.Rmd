@@ -1,0 +1,165 @@
+---
+title: "회귀 모형"
+output: html_document
+---
+
+### 회귀
+* 어떤 숫자 집합(input, predictor, feature)으로 다른 숫자 집합(output)을 예측하는 것
+* 분류와 다른 점은 출력값이 실제 숫자라는 점
+* ex) 흡연 습관을 바탕으로 수명 예측, 전날의 기온을 기초로 다음날 기온 예상 
+* 통계학자들이 지난 200년간 연구한 다양한 회귀 알고리즘들은 모두 입력값을 출력값으로 바꾸어 예측을 만드는 방법론들이다. 
+
+#### 선형 회귀의 기본 모형
+우리가 가진 정보를 입력값으로 활용하는 가장 간단한 방법?  
+-> 입력값 없이 과거의 출력값의 평균만으로 미래를 예측하는 방법  
+(만약 아무런 정보가 없다면 가장 참 값에 가까운 최적 예측값은 평균값으로 알려져 있다. 뒤에서 자세히 설명)
+
+**- 흡연자와 비흡연자를 비교하는 밀도 그래프**
+```{r}
+library('ggplot2')
+
+# First snippet
+ages <- read.csv(file.path('data', 'longevity.csv'))
+
+# 각 분포의 중심 위치가 다르므로
+# 흡연과 수명이 상관이 있다고 보는 게 합리적이다. 
+ggplot(ages, aes(x = AgeAtDeath, fill = factor(Smokes))) +
+  geom_density() +
+  facet_grid(Smokes ~ .)
+```
+
+우리에게 이런 정보가 없다고 가정해보자.  
+만약 흡연 습관 정보 없이 수명을 예측하는 숫자를 하나 골라야 한다면?  
+-> 제곱오차(squared error, ( 참 값(y) - y에 대한 가설(h) )^2) 측도가 작은 것이 좋은 예측 
+
+앞에서 본 데이터에서 평균 수명(AgeAtDeath)은 `r mean(ages$AgeAtDeath)`이다.  
+예측값을 73정도로 추정할 경우 예측 성능이 얼마나 나빠지는가? or 측도값이 얼마인가?
+```{r} 
+ages <- read.csv(file.path('data', 'longevity.csv'))
+guess <- 73
+(mse <- with(ages, mean((AgeAtDeath - guess) ^ 2)))
+```
+평균 제곱 오차는 `r mse`. 이것이 최적 추정치인지 확인하기 위해 63, 83 범위에서 mse값을 모두 계산해보자.
+```{r}
+ages <- read.csv(file.path('data', 'longevity.csv'))
+
+guess.accuracy <- data.frame()
+
+for (guess in seq(63, 83, by = 1))
+{
+  prediction.error <- with(ages,
+                           mean((AgeAtDeath - guess) ^ 2))
+  guess.accuracy <- rbind(guess.accuracy,
+                          data.frame(Guess = guess,
+                                     Error = prediction.error))
+}
+
+ggplot(guess.accuracy, aes(x = Guess, y = Error)) +
+  geom_point() +
+  geom_line()
+```
+
+추정치 73 부근에서 최저점을 보인다. 일반적으로 제곱오차를 최소화하는 예측값은 평균값임이 수학적으로 증명되어 있다.  
+-> 중요한 사실을 알려줌 : 흡연에 대한 정보를 추가해서 추정한 값이 단순 평균값을 써서 추정했을 때보다 얼마나 더 성능이 좋은지를 바탕으로 평가해야 한다. 즉, 단순 평균값을 이용해 구한 값이 일종의 기준점이 된다. 
+
+#### 가변수를 활용한 회귀
+사람들의 흡연 여부 정보를 어떻게 써야 수명을 더 잘 예측할 수 있을까?  
+-> 흡연자와 비흡연자의 평균 사망 나이를 따로 계산, 각각의 예측값으로 활용
+
+**-흡연자와 비흡연자 두 집단의 각 평균값으로 예측값을 사용하여 RMSE 계산**
+```{r}
+ages <- read.csv(file.path('data', 'longevity.csv'))
+
+constant.guess <- with(ages, mean(AgeAtDeath))
+
+(constant.rmse <- with(ages, sqrt(mean((AgeAtDeath - constant.guess) ^ 2))))
+
+smokers.guess <- with(subset(ages, Smokes == 1),
+                      mean(AgeAtDeath))
+
+non.smokers.guess <- with(subset(ages, Smokes == 0),
+                          mean(AgeAtDeath))
+
+ages <- transform(ages,
+                  NewPrediction = ifelse(Smokes == 0,
+                                         non.smokers.guess,
+                                         smokers.guess))
+
+(smoke.rmse <- with(ages, sqrt(mean((AgeAtDeath - NewPrediction) ^ 2))))
+```
+
+결과는 아래 표와 같다. 정보를 추가한 경우 예측 오차가 약 10% 감소했다. 이처럼 데이터 점을 둘로 분류할 수 있을 때, 두 개의 종류가 예측하려는 출력값과 연관이 있는 경우에는 정보를 추가했을 때 일반적으로 더 나은 결과를 낸다. ex) 남자/여자, 공화당/민주당
+
+정보 | 평균제곱근오차
+-----|---------------
+흡연정보 X | `r constant.rmse`
+흡연정보 O | `r smoke.rmse`
+
+추가로, 정보가 많아진다는 이야기는 두 가지를 뜻한다. 
+
+* 이항 분류 대신 연속적인 값을 입력값으로 사용
+* 여러 정보를 동시에 사용. ex) 흡연 여부와 부모의 사망 연령 정보를 모두 사용
+
+
+#### 선형회귀 
+가지고 있는 여러 정보를 다 활용하기란 쉽지 않다. 실제로 정보를 모두 활용하려면 가정을 좀 단순화할 필요가 있다. 선형 회귀에서 사용하는 가정 두 가지는 아래와 같다.
+
+* 분리성(separability)/가법성(additivity)  
+추정치에 영향을 주는 정보가 여러 개라면 각 정보를 독립적으로 활용했을 때처럼 각각의 효과를 더하기가 가능하다고 가정한다. 예를 들어, 알콜중독 1년, 흡연자 5년 일때 알콜중독 흡연자는 6년이 된다는 뜻. 각 경우가 동시에 발생했을 때 각 효과가 독립적으로 더해진다는 가정은 매우 큰 가정이지만 회귀 분석을 응용할 때 좋은 시작접이 되는 경우가 많다. 
+* 단조성(monotonicity)/선형성(linearity)  
+모형의 입력 중 하나를 변화시키면 예측 출력이 항상 증가하거나 감소하는 성질을 단조성이라고 한다. 단조성 가정도 강하긴 하지만 선형 회귀의 기본 가정인 선형성보다는 훨씬 약하다. 선형 모형은 항상 단조성 모형이지만, 선형이 아니어도 단조성인 곡선은 존재할 수 있다. (참고: Curve, Line, Wave 그림)
+
+가법성과 선형성을 염두에 둔 채로 간단한 선형 회귀 예제를 다뤄 보자.
+```{r}
+library('ggplot2')
+
+# 키와 몸무게 데이터
+heights.weights <- read.csv(file.path('data',
+                                      '01_heights_weights_genders.csv'),
+                            header = TRUE,
+                            sep = ',')
+# geom_smooth에 선형 모델을 뜻하는 lm 인수를 설정하고 호출하여 선형회귀 직선을 그려준다.
+ggplot(heights.weights, aes(x = Height, y = Weight)) +
+  geom_point() +
+  geom_smooth(method = 'lm')
+```
+
+직선을 이용해서 키로 몸무게를 예측하는 방법이 꽤 잘 동작함을 알 수 있다.  
+그러면 어떻게 이 그래프의 직선을 정의하는 숫자를 찾을 수 있을까?  
+lm을 실행하고 나면, 이력과 출력 사이의 선형 모형 계수를 반환하는 coef 함수를 이용해 회귀선의 절편과 기울기를 알아낼 수 있다. (선형 모형 : 2차원에서 직선, 3차원에서 평면, 그 이상에서는 초평면)
+
+```{r}
+fitted.regression <- lm(Weight ~ Height,
+                        data = heights.weights)
+
+coef(fitted.regression)
+
+intercept <- coef(fitted.regression)[1]
+slope <- coef(fitted.regression)[2]
+
+# coef가 반환한 값은 아래와 같이 해석하면 된다. 
+# predicted.weight <- intercept + slope * observed.height
+# predicted.weight == -350.737192 + 7.717288 * observed.height
+```
+
+그런데 위 선형회귀식에 따르면 몸무게가 0 파운드가 되려면 키가 45인치라야 한다.  
+이 회귀 모형은 어린이나 키가 아주 작은 어른에게는 잘 맞지 않는다. 이것은 선형 회귀상의 일반적인 문제로,  
+예측 모형은 보통 과거에 관찰했던 입력값들에서 크게 동떨어져 있는 값에 대해서는 성능이 별로 좋지 않다. 
+
+**- 선형 회귀의 결과를 확인하는 방법들**
+predict 
+```{r}
+head(predict(fitted.regression), 30)
+```
+
+```{r}
+# Ninth snippet
+true.values <- with(heights.weights, Weight)
+errors <- true.values - predict(fitted.regression)
+
+# Tenth snippet
+head(residuals(fitted.regression), 30)
+
+# Eleventh snippet
+plot(fitted.regression, which = 1)
+```
