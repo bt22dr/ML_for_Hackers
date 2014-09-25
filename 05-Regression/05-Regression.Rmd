@@ -153,13 +153,131 @@ head(predict(fitted.regression), 30)
 ```
 
 ```{r}
-# Ninth snippet
 true.values <- with(heights.weights, Weight)
 errors <- true.values - predict(fitted.regression)
 
-# Tenth snippet
 head(residuals(fitted.regression), 30)
 
-# Eleventh snippet
 plot(fitted.regression, which = 1)
 ```
+
+
+
+########################
+
+### 웹 트래픽 예측
+회귀를 이용해서 2011년 인터넷 상위 1000개 웹사이트의 페이지 방문 수를 예측하는 예제를 살펴보자. Neil Kodner가 제공한 데이터셋에서 Rank(순위), PageViews(페이지 방문 수), UniqueVisitors(순방문자 수), HasAdvertising(광고 포함 여부), IsEnglish(영문 여부)만 사용한다. (표 5-3)
+
+PageViews와 UniqueVisitors의 관계를 산포도로 그려보자.
+
+```{r}
+top.1000.sites <- read.csv(file.path('data', 'top_1000_sites.tsv'),
+                           sep = '\t',
+                           stringsAsFactors = FALSE)
+
+ggplot(top.1000.sites, aes(x = PageViews, y = UniqueVisitors)) +
+  geom_point()
+```
+
+심각하다. 이런 문제는 정규 분포가 아닌 데이터에서 자주 나타나는데, 전체 값들을 다 보여줄 만큼 큰 척도를 사용하면 데이터 점 대다수가 가깝게 위치해서 눈으로는 구별이 안된다. 
+
+PageViews만의 분포를 살펴보자.
+```{r}
+ggplot(top.1000.sites, aes(x = PageViews)) +
+  geom_density()
+
+ggplot(top.1000.sites, aes(x = log(PageViews))) +
+  geom_density()
+```
+
+PageViews만 봐도 값이 몰려 있는 것을 알 수 있다. 분석하려는 값에 로그를 취한 값으로 밀도 그래프를 다시 그려보면 데이터를 파악하는데 훨씬 도움이 된다.
+
+두 변수를 모두 로그변환하고 회귀식을 그려보면 아래와 같다. 
+```{r}
+ggplot(top.1000.sites, aes(x = log(PageViews), y = log(UniqueVisitors))) +
+  geom_point() +
+  geom_smooth(method = 'lm', se = FALSE)
+```
+
+회귀 분석을 돌려보고 summary() 함수를 이용해 분석 결과를 요약해보자.
+```{r}
+lm.fit <- lm(log(PageViews) ~ log(UniqueVisitors),
+             data = top.1000.sites)
+
+summary(lm.fit)
+```
+
+출력값을 자세히 살펴보자.
+
+* lm 호출 내용
+* 잔차의 사분위수 -> 요약 수치보다는 그래프에서 더 많은 정보를 얻을 수 있다. 
+* 회귀계수 
+    + Estimate(추정) 열 : coef()가 출력하는 값
+    + Std. Error(표준오차) : 신뢰성 측도
+    + t value, p-value : 참 계수가 0이 아닐 확신의 정도를 측정하는 값들이며 조사중인 입력과 출력 사이에 실제로 연관관계가 있는지 정할 때 사용된다. t 값의 의미는 계수와 표준오차의 배수를 계산하여 구한다. 계수가 0으로부터 2 표준오차만큼 떨어져 있는지 여부를 가지고 유의성 여부를 판단한다. 이는 예전부터 입출력 간의 상관관계 여부를 걸정하는 경계값(cutoff)으로 쓰였다. 
+* 유의성 코드 
+* Residual standard error(잔차 표준 오차) : 
+    + 예측검증력(predictive power)과 관련된 값으로 sqrt(mean(residuals(lm.fit)^2))로 계산되는 RMSE 값이다. 
+    + 자유도, 과대적합(overfitting) : 두 개의 모수 알파와 베타를 추정해야 하므로 n-2의 자유도를 가진다 -> 6장에서 자세히 다룬다. 
+* R-squared, Adjusted R-squared : 모형이 데이터 분산의 몇 %를 설명하는지 나타내는 값.
+* F 통계량 : 평균 예측치에 대비한 모형의 성능 개선 측도. p값은 계산 원리를 완전히 이해해야만 쓸모가 있으며, 그렇지 않을 경우 잘못된 정보에 기반하여 잘못된 결론을 내릴 수도 있다. -> 6장에서 자세히 다룬다. 
+
+HasAdvertising, IsEnglish를 모형 입력에 포함시켜 분석해보자.
+```{r}
+lm.fit <- lm(log(PageViews) ~ HasAdvertising + log(UniqueVisitors) + InEnglish,
+             data = top.1000.sites)
+summary(lm.fit)
+```
+
+중회귀 분석의 수행 결과는 기본적으로 단순선형회귀분석과 동일하게 해석하면 된다.  
+
+여기서 주의할 점은 factor형 변수를 추가한 것이다.  
+회귀모형에서 factor를 사용할 때는 한 레벨을 절편의 일부로, 다른 레벨은 모형에 직접 포함되도록 해야 한다.  
+HasAdvertising==No인 웹사이트는 절편에 포함되도록 모형화함.  
+바꿔말하면, 광고가 없는 어떤 웹사이트의 UniqueVisitors가 1명일 때의 예측치가 절편값이라는 의미
+
+세 입력을 따로 써서 어떤 입력값이 가장 예측력이 좋은지 비교해보자.
+```{r}
+lm.fit <- lm(log(PageViews) ~ HasAdvertising,
+             data = top.1000.sites)
+summary(lm.fit)$r.squared
+
+lm.fit <- lm(log(PageViews) ~ log(UniqueVisitors),
+             data = top.1000.sites)
+summary(lm.fit)$r.squared
+
+lm.fit <- lm(log(PageViews) ~ InEnglish,
+             data = top.1000.sites)
+summary(lm.fit)$r.squared
+```
+
+각변수가 각각 분산의 1%, 46%, 3%를 설명한다.  
+
+
+#### 상관계수 정의
+
+상관계수 : 두 변수 사이의 두 변수 사이의 직선관계의 강도를 나타냄
+
+x와 y를 그려보면 완벽한 선형 관계는 아니다. 
+```{r}
+x <- 1:10
+y <- x ^ 2
+
+ggplot(data.frame(X = x, Y = y), aes(x = X, y = Y)) +
+  geom_point() +
+  geom_smooth(method = 'lm', se = FALSE)
+```
+
+그러면 얼마나 선형에 가까울까? cor() 함수로 상관계수를 구하면 된다. 
+```{r}
+cor(x, y)
+```
+
+cor() 함수 대신 직접 lm을 활용해서 구해볼까? 먼저 x와 y의 척도를 맞춰주고(scale 함수 사용) 회귀 분석을 수행하면 x와 y 사이 상관계수가 척도 조정된 두 변수의 선형 회귀 계수와 거의 같은 것을 발견할 수 있다. 
+```{r}
+coef(lm(scale(y) ~ scale(x)))
+```
+
+상관계수는 두 변수의 관계가 얼마나 선형적인지를 나타내는 측도이기 때문에  
+인과 관계에 대해서는 알려주는 바가 전혀 없다. => "Correlation does not imply causation"
+![Correlation Is Not Causation](images/correlation.png)
