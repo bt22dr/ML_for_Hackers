@@ -7,5 +7,14 @@ slides/01-Slides/cache
 slides/01-Slides/data
 slides/05-Slides/cache
 
+# History files
+.Rhistory
 
-.Rproj.user
+# Example code in package build process
+*-Ex.R
+
+# R data files from past sessions
+.Rdata
+
+# RStudio files
+.Rproj.user/
