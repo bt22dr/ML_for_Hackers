@@ -109,6 +109,8 @@ ages <- transform(ages,
 * 단조성(monotonicity)/선형성(linearity)  
 모형의 입력 중 하나를 변화시키면 예측 출력이 항상 증가하거나 감소하는 성질을 단조성이라고 한다. 단조성 가정도 강하긴 하지만 선형 회귀의 기본 가정인 선형성보다는 훨씬 약하다. 선형 모형은 항상 단조성 모형이지만, 선형이 아니어도 단조성인 곡선은 존재할 수 있다. (참고: Curve, Line, Wave 그림)
 
+**- 선형 회귀 예제**
+
 가법성과 선형성을 염두에 둔 채로 간단한 선형 회귀 예제를 다뤄 보자.
 ```{r}
 library('ggplot2')
@@ -145,9 +147,13 @@ slope <- coef(fitted.regression)[2]
 그런데 위 선형회귀식에 따르면 몸무게가 0 파운드가 되려면 키가 45인치라야 한다.  
 이 회귀 모형은 어린이나 키가 아주 작은 어른에게는 잘 맞지 않는다. 이것은 선형 회귀상의 일반적인 문제로,  
 예측 모형은 보통 과거에 관찰했던 입력값들에서 크게 동떨어져 있는 값에 대해서는 성능이 별로 좋지 않다. 
+(이런 현상을 두고 기술적 용어로, 회귀는 내삽(interpolation) 성능은 좋지만 외삽(extrapolation)은 좋지 않다고 말한다)
 
 **- 선형 회귀의 결과를 확인하는 방법들**
-predict 
+
+모형의 예측값을 predict 함수를 이용해 얻고 참 값과의 차이를 계산한다.  
+이렇게 계산한 오차는 회귀선이 설명하고 남은 부분이라는 이유로 잔차(residual)라고 불린다.  
+residual 함수를 써서 잔차를 구하고 그래프로 표현해본다.  
 ```{r}
 head(predict(fitted.regression), 30)
 ```
@@ -160,6 +166,46 @@ head(residuals(fitted.regression), 30)
 
 plot(fitted.regression, which = 1)
 ```
+
+-> TODO: 빨간 선의 의미를 찾아보기  
+잔차에 체계적 구조가 없으므로 선형 모형이 잘 적용된다고 말할 수 있다.  
+하지만 아래와 같은 데이터의 경우에는 잔차에서 뚜렷한 구조가 보인다. 
+```{r echo=FALSE}
+x <- 1:10
+y <- x ^ 2
+
+fitted.regression <- lm(y ~ x)
+plot(fitted.regression, which = 1)
+```
+
+모형에서는 관찰 대상이 신호(predict 함수의 결과)와 잡음(residuals 함수의 결과)로 나뉘어야 한다.  
+육안으로도 잔차에서 신호가 보인다면, 그 모형은 신호를 다 잡아내서 잔차에 잡음만 남길만큼 강력하지 않다는 뜻이다.  
+
+**- 회귀 모형의 평가**
+
+잔차 -> 제곱오차(SSE) -> 평균제곱오차(MSE) -> 평균제곱근오차(RMSE)
+```{r}
+x <- 1:10
+y <- x ^ 2
+
+fitted.regression <- lm(y ~ x)
+
+errors <- residuals(fitted.regression)
+squared.errors <- errors ^ 2
+(sse <- sum(squared.errors))
+(mse <- mean(squared.errors))
+(rmse <- sqrt(mse))
+```
+
+RMSE의 단점은 썩 좋지 않은 성능이 무언지 바로 명확하게 와닿지 않는다는 것.  
+RMSE 값은 제한이 없기 때문에 잘못된 값을 예측하면 계속해서 값이 커질 수 있기 때문이다.  
+-> 해결책은 R^2 값을 사용하면 된다. 위에서 사용한 모델의 R-squared 값은 다음과 같이 구할 수 있다.
+```{r}
+summary(fitted.regression)$r.squared
+cor(x, y)^2
+```
+R-squared는 평균 출력값만 이용하는 예측 모형의 MSE와 해당 모형의 MSE의 비율로 구하며  
+두 변수의 상관계수의 제곱값과 동일하다.
 
 
 
