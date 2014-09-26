@@ -167,9 +167,11 @@ head(residuals(fitted.regression), 30)
 plot(fitted.regression, which = 1)
 ```
 
--> TODO: 빨간 선의 의미를 찾아보기  
+-> TODO: 빨간 선의 의미를 찾아보기
+
 잔차에 체계적 구조가 없으므로 선형 모형이 잘 적용된다고 말할 수 있다.  
 하지만 아래와 같은 데이터의 경우에는 잔차에서 뚜렷한 구조가 보인다. 
+
 ```{r echo=FALSE}
 x <- 1:10
 y <- x ^ 2
@@ -202,11 +204,41 @@ RMSE 값은 제한이 없기 때문에 잘못된 값을 예측하면 계속해�
 -> 해결책은 R^2 값을 사용하면 된다. 위에서 사용한 모델의 R-squared 값은 다음과 같이 구할 수 있다.
 ```{r}
 summary(fitted.regression)$r.squared
-cor(x, y)^2
+cor(x, y)^2 # 두 변수의 상관계수의 제곱값과 동일하다.
 ```
-R-squared는 평균 출력값만 이용하는 예측 모형의 MSE와 해당 모형의 MSE의 비율로 구하며  
-두 변수의 상관계수의 제곱값과 동일하다.
 
+R-squared는 1. 평균 출력값만 이용하는 예측 모형의 MSE와 2. 해당 모형의 MSE의 비율로 구한다.  
+R-squared = 설명된 변동 / 총변동 = SSR / SST
+```{r}
+mean.mse <- mean(sum((y - mean(y))^2)) # SST
+
+model <- lm(y~x)
+predict_res <- predict(model)
+model.mse <- mean(sum((predict_res-mean(y))^2)) # SSR
+
+residual.mse <- mean(sum((y - predict_res)^2)) # SSE
+# mean(sum(residuals(model)^2))와 동일한 값
+
+
+r2 <- 1 - (residual.mse / mean.mse) # R-squared = 1 - (SSE / SST)
+r2 <- model.mse / mean.mse # R-squared = SSR / SST
+```
+
+SST, SSR, SSE의 의미
+
+* $\begin{align*}
+\sum_{i=1}^n(y_i - \bar{y})^2 
+ &= \sum_{i=1}^n(\hat{y_i} - \bar{y})^2 + \sum_{i=1}^n(y_i - \hat{y_i})^2\\ 
+SST
+ &= SSR + SSE 
+\end{align*}$
+* SST(총제곱합, total sum of squares) : Y의 관측값들이 가지는 총변동을 나타낸다. 
+* SSR(회귀제곱합, regression sum of squares) : Y의 총변동 중 회귀식에 의해 설명된 변동을 나타낸다. 
+* SSE(오차제곱합, error sum of squares) : 잔차들의 제곱합. Y의 총변동 중 설명되지 않은 변동을 나타낸다.
+
+추정된 회귀식이 모든 표본의 변동을 완전히 설명하고 있다면
+(즉, 모든 관측값들이 표본회귀직선 위에 있을 경우)  
+설명되지 않은 변동 SSE는 0이 되고 R-squared는 1이 될 것이다.
 
 
 ########################
