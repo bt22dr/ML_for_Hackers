@@ -18,3 +18,6 @@ slides/05-Slides/cache
 
 # RStudio files
 .Rproj.user/
+
+# HTML files
+.html
