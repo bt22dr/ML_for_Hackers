@@ -1,0 +1,589 @@
+---
+title: "정규화"
+output: html_document
+---
+
+### 데이터 열 사이의 비선형 관계
+앞에서 다룬 선형 회귀는 두 변수 사이의 관계를 직선으로 가정했다.  
+반면 직선으로 묘사가 잘 되지 않는 관계도 선형 회귀로 발견이 된다. (그림 A)
+
+산포도나 회귀선을 그려보면 X와 Y 사이의 관계가 직선으로 잘 표현되지 않음  
+이 데이터의 패턴을 선 하나로 표현하려는 시도가 잘못되었음이 명확히 보인다. (그림 B)
+
+직선을 사용하면 계통 오차(systematic errors)가 생기는 것을 잔차 그래프(residual plot) 확인  
+원본 데이터의 구조가 모두 보이는 이유는 기본 선형 회귀 모형으로는 구조가 잘 잡히지 않았기 때문이다. (그림 C)
+
+geom_smooth 함수에서 method인수를 주지 않고 사용하면 일반화 가법모형(Generallized Additaive Model, GAM)  
+이라는 복잡한 통계모형에 데이터를 적합 시킬수 있다. 이를 사용하면 매끄럽고 비선형적인 구조 표현이 가능하다. (그림 D)
+
+```{r echo=FALSE, message=FALSE}
+library(ggplot2)
+library(grid)
+
+set.seed(1)
+
+x <- seq(-10, 10, by = 0.01)
+y <- 1 - x ^ 2 + rnorm(length(x), 0, 5)
+
+fitted.regression <- lm(y ~ x)
+g <- ggplot(data.frame(X = x, Y = y), aes(x = X, y = Y))
+plot1 <- g + geom_point(size=1) + labs(title="A")
+plot2 <- g + geom_point(size=1) + geom_smooth(method=lm) + labs(title="B")
+plot3 <- ggplot(data.frame(X=x, Y=fitted.regression$residuals), aes(x=X, y=Y)) + 
+  geom_point(size=1) + labs(title="C")
+plot4 <- g + geom_point(size=1) + geom_smooth(se = FALSE) + labs(title="D")
+
+
+vplayout <- function(x, y) viewport(layout.pos.row = x, layout.pos.col = y)
+
+grid.newpage()
+pushViewport(viewport(layout = grid.layout(2, 2)))
+print(plot1, vp = vplayout(1, 1))
+print(plot2, vp = vplayout(1, 2))
+print(plot3, vp = vplayout(2, 1))
+print(plot4, vp = vplayout(2, 2))
+```
+
+어떻게 데이터에 곡선을 적합시킬 수 있을까?  
+원 입력값에 대한 비선형 함수를 새로운 입력값으로 만들어 사용 (ex. 원 입력 x를 제곱한 값을 새로운 입력값으로)  
+아래 그림과 같이 x.squared에 대한 y 그래프를 그려보면 직선 적합이 나온다.  
+원래의 비선형 문제를 선형 회귀의 선형성 가정을 실제로 만족하는 새로운 문제로 변환한 것.  
+이는 커널 트릭의 기본 개념이기도 하다. 
+```{r}
+x.squared <- x^2
+
+ggplot(data.frame(XSquared = x.squared, Y = y), aes(x = XSquared, y = Y)) +
+  geom_point() +
+  geom_smooth(method = 'lm', se = FALSE)
+```
+
+예측 품질이 얼마나 좋아졌는지 확인하기 위해 각 선형 회귀의 R^2 값을 계산  
+간단한 제곱 변환만으로 분산을 설명하는 정도가 0%에서 97%로 바뀌었다. 
+```{r}
+summary(lm(y ~ x))$r.squared
+summary(lm(y ~ x.squared))$r.squared
+```
+
+두 변수 사이에 있는 어떤 종류의 관계도 더 복잡한 곡선 형태를 이용해 찾아낼 수 있음이 수학적으로 밝혀졌다.  
+이 방법 중 하나가 다항식 회귀(polynomial regression)
+
+다항식 회귀의 유연성이 전적으로 좋은 것만은 아니다.   
+데이터에서 찾고자 하는 진짜 패턴 말고 데이터의 잡음 또한 잘 찾아내기 때문
+
+선형 회귀 같은 단순한 도구 대신에 다항식 회귀 같이 더 복잡한 도구를 사용하려 할 때 
+배워야 할 추가 지식(교차검증, 정규화)에 중점을 두고 설명한다. 
+
+#### 다항식 회귀 소개
+x와 y의 관계가 직선으로는 도저히 설명이 안 되도록 사인 곡선으로 데이터를 만들면  
+단순 선형 회귀 모형이 들어맞지 않을게 분명하다. 한번 단순 선형 모형을 실행해서 성능이 어떤지 볼까?
+```{r echo=FALSE}
+set.seed(1)
+
+x <- seq(0, 1, by = 0.01)
+y <- sin(2 * pi * x) + rnorm(length(x), 0, 0.1)
+
+df <- data.frame(X = x, Y = y)
+
+ggplot(df, aes(x = X, y = Y)) +
+  geom_point()
+
+summary(lm(Y ~ X, data = df))
+```
+
+단순 선형 회귀 모형이 파형 데이터에는 나쁜 모형이라는 사실에도 불구하고 데이터 분산의 60%가 설명 가능했다.  
+좋은 모형은 대략 90% 이상을 설명해야 한다는 것을 알고있지만 이 정도 수준의 적합도를 내는 이유도 궁금하네?  
+
+그려보자.  
+선형 모형이 아래쪽으로 내려가는 직선으로 사인 곡선의 절반을 찾아냈다.  
+하지만 이는 좋은 전략은 아니다. 왜냐하면
+
+* 아래쪽 직선으로 묘사되지 않는 데이터를 체계상으로 무시하기 때문
+* 게다가 사인파 곡선이 다음 주기로 확장되면 이 모형의 R^2 값은 0%로 갑자기 수렴해갈 것이다. 
+
+```{r}
+ggplot(data.frame(X = x, Y = y), aes(x = X, y = Y)) +
+  geom_point() +
+  geom_smooth(method = 'lm', se = FALSE)
+```
+
+위에서 살펴본 예제에서는 기본 선형 회귀 모형이 데이터에 우연히 나타나는 패턴에 과대적합하는 바람에  
+파형 구조에 내재한 진짜 구조를 찾는데 실패하는 사례를 보았다. 선형 회귀 알고리즘에 더 많은 입력값을 넣으면 어떨까?
+
+x의 제곱항, 세제곱항을 같이 넣어서 모형의 재량권을 늘려보면 예측력이 상당히 개선된다. (R^2 60%->97%)
+```{r}
+df <- transform(df, X2 = X ^ 2)
+df <- transform(df, X3 = X ^ 3)
+
+summary(lm(Y ~ X + X2 + X3, data = df))
+```
+
+이론상 x의 고차항을 계속 추가하는 논리를 따르지 않을 이유가 없어 보인다.  
+하지만 고차항을 계속 추가하면 결국 데이터 점보다 입력값이 더 많게 되고  
+그 말은 이론상 데이터 적합을 완벽하게 할 수 있다는 뜻이므로 보통 문제가 된다. 
+
+더 미묘한 문제는 특이점(singularity) 문제  
+(cf. singular matrix : http://www.ktword.co.kr/abbr_view.php?m_temp1=5051&m_search=%C5%B8)  
+데이터에 추가한 새로운 열이 원본 열과 값 차이가 거의 나지 않아서 더이상 lm이 작동하지 않는 문제이다.  
+(참고 : 다중공선성 - http://ai-times.tistory.com/268)
+```{r}
+df <- transform(df, X4 = X ^ 4)
+df <- transform(df, X5 = X ^ 5)
+df <- transform(df, X6 = X ^ 6)
+df <- transform(df, X7 = X ^ 7)
+df <- transform(df, X8 = X ^ 8)
+df <- transform(df, X9 = X ^ 9)
+df <- transform(df, X10 = X ^ 10)
+df <- transform(df, X11 = X ^ 11)
+df <- transform(df, X12 = X ^ 12)
+df <- transform(df, X13 = X ^ 13)
+df <- transform(df, X14 = X ^ 14)
+df <- transform(df, X15 = X ^ 15)
+
+summary(lm(Y ~ X + X2 + X3 + X4 + X5 + X6 + X7 + X8 + X9 + X10 + X11 + X12 + X13 + X14,
+           data = df))
+```
+
+새로 추가한 열의 차수가 점점 높아질수록 원래 열과의 상관관계가 너무 높아져서  
+선형 회귀 알고리즘이 제대로 작동하지 않아 모든 열에 대한 계수를 따로 구할 수 없게 된다는 점이다. 
+```{r}
+library(corrplot)
+
+corrplot(cor(df[-2]), order = "hclust")
+```
+
+해결책 :  
+x의 고차항을 단순히 더하지 말고 x의 거듭제곱 항처럼 작동하는 더 복잡한 변수를 추가하되,  
+x와 x^2항과 같은 식으로 상관관계가 없도록 변수를 조절하는 것이다. (참고 1)
+
+이런 x의 거듭제곱 항의 변형을 직교 다항식(orthogonal polynomial)이라 하며  
+R의 poly 함수로 쉽게 생성 가능하고 lm을 실행할 때 특이점 문제가 발생하지 않는다. 
+
+실제로 poly 함수를 사용하여 lm 출력 결과를 살펴보면 표현력이 많이 올라간 것을 확인할 수 있다. 
+```{r}
+summary(lm(Y ~ poly(X, degree = 14), data = df))
+```
+
+하지만 이 사실이 꼭 좋은 것만은 아니다 poly로 추가된 거듭제곱 항이 어떤 문제를 일으키는지 살펴보기 위해  
+degree 인수를 1, 3, 15, 25로 증가시키면서 poly가 생성한 모형의 모양을 살펴보자.  
+degree가 커질 수록 더이상 파형을 닮지 않고 모양이 왜곡되는게 뚜렷히 보인다.  
+데이터가 감당 못할 정도로 모형이 너무 강력해진다는 점이 문제이다 => 과대적합(overfitting) 문제
+```{r echo=FALSE}
+poly.fit <- lm(Y ~ poly(X, degree = 1), data = df)
+df <- transform(df, PredictedY = predict(poly.fit))
+
+plot1 <- ggplot(df, aes(x = X, y = PredictedY)) +
+  geom_point() +
+  geom_line()
+
+poly.fit <- lm(Y ~ poly(X, degree = 3), data = df)
+df <- transform(df, PredictedY = predict(poly.fit))
+
+plot2 <- ggplot(df, aes(x = X, y = PredictedY)) +
+  geom_point() +
+  geom_line()
+
+poly.fit <- lm(Y ~ poly(X, degree = 15), data = df)
+df <- transform(df, PredictedY = predict(poly.fit))
+
+plot3 <- ggplot(df, aes(x = X, y = PredictedY)) +
+  geom_point() +
+  geom_line()
+
+poly.fit <- lm(Y ~ poly(X, degree = 25), data = df)
+df <- transform(df, PredictedY = predict(poly.fit))
+
+plot4 <- ggplot(df, aes(x = X, y = PredictedY)) +
+  geom_point() +
+  geom_line()
+
+grid.newpage()
+pushViewport(viewport(layout = grid.layout(2, 2)))
+print(plot1, vp = vplayout(1, 1))
+print(plot2, vp = vplayout(1, 2))
+print(plot3, vp = vplayout(2, 1))
+print(plot4, vp = vplayout(2, 2))
+```
+
+### 과대적합을 막는 방법
+해결책 : 교차검증(cross-validation)과 정규화(regularization)
+
+#### 교차검증
+앞에서 모형이 데이터에 내재한 진짜 신호 대신 잡음에 적합될 경우에 과대적합이라고 했다.  
+하지만 참 값이 뭔지 모른다면 과대적합에 가까워지는지 멀어지는지 어떻게 알 수 있을까?  
+비결은 참 값의 의미를 명확히 하는 것. 예측 모형은 그 목적상 미래의 데이터에 대한 예측이 정확할 때 참 값에 가깝다.  
+보통은 미래의 데이터를 미리 구할 수는 없으므로 과거 데이터를 두 부분으로 나누어서 미래의 데이터를 가상으로 만든다.  
+이런 전략을 통해 아직 접하지 않은 데이터에 모형을 검증하는 과정을 완전히 현실적으로 모의 실험할 수 있다. 
+
+교차검증이란 과거 데이터의 일부분을 떼어 놓고 모형을 적합시킴으로써  
+미래 데이터에 모형을 검증하는 과정을 모의 실험하는 작업을 뜻한다. 
+
+사인 곡선 예제에 교차검증을 적용해서 적당한 다항식 회귀 차수를 찾아보자.  
+
+1. 우선 모형을 적합시킬 학습 데이터와 모형의 성능을 시험할 검증 데이터로 나눈다.  
+여기서는 5:5로 나누었지만 실제로 교차검증을 적용할 때는 학습 데이터의 비중을 높이는게(80% 정도) 좋다.  
+모형 적합에 더 많은 데이터를 쓸수록 모형 성능이 더 나아지는 경향이 있기 때문이다. 
+2. 각 데이터 세트가 특정 규칙에 따라 분리되지 않아야 하므로 데이터를 분리할 때는 항상 무작위 방법을 쓰도록 한다.  
+예를 들어 작은 값만 학습 데이터세트에 넣고 큰 값은 검증 데이터세트에 넣는다면 문제가 생길 것이다)  
+3. 다항식의 차수를 바꾸어가며 training.df에 있는 데이터에 대해 각 차수의 다항식 회귀 모형을 적합시키고  
+training.df와 test.df 모두에 대해 성능 평가 결과를 저장한 후 그래프로 그려본다.
+```{r}
+n <- length(x)
+
+# 무작위 방법으로 학습 데이터, 검증 데이터 분리한다. 
+indices <- sort(sample(1:n, round(0.5 * n)))
+
+training.x <- x[indices]
+training.y <- y[indices]
+
+test.x <- x[-indices]
+test.y <- y[-indices]
+
+training.df <- data.frame(X = training.x, Y = training.y)
+test.df <- data.frame(X = test.x, Y = test.y)
+
+# 모형의 성능을 측정하는 데는 RMSE를 사용
+rmse <- function(y, h)
+{
+  return(sqrt(mean((y - h) ^ 2)))
+}
+
+# 다항식의 차수를 1~12까지 바꾸어가며 다항식 회귀 모형을 시험해보고 
+# 가장 좋은 경우를 찾는다. 
+performance <- data.frame()
+for (d in 1:12) {
+  poly.fit <- lm(Y ~ poly(X, degree = d), data = training.df)
+
+  # 트레이닝 데이터의 성능
+  performance <- rbind(performance,
+                       data.frame(Degree = d,
+                                  Data = 'Training',
+                                  RMSE = rmse(training.y, predict(poly.fit))))
+  # 테스트 데이터의 성능
+  performance <- rbind(performance,
+                       data.frame(Degree = d,
+                                  Data = 'Test',
+                                  RMSE = rmse(test.y, predict(poly.fit,
+                                                              newdata = test.df))))
+}
+
+ggplot(performance, aes(x = Degree, y = RMSE, linetype = Data)) +
+  geom_point() +
+  geom_line()
+```
+
+결과 분석
+
+* 검증 데이터에 대해서 중간 차수가 가장 좋은 성능을 보이는 것이 뚜렷하다.
+* 차수가 낮은 경우, 모형이 데이터의 실제 패턴을 찾지 못해서 training/test 데이터 모두 예측 성능이 무척 떨어진다.  
+이렇게 모형이 너무 단순해서 학습 데이터에도 잘 맞지 않는 경우는 과소적합(underfitting)이라 부른다. 
+* 차수가 큰 경우, 모형의 예측 성능이 점점 나빠지는 현상이 보인다.  
+검증 데이터에는 없지만 학습 데이터에 나타나는 우연한 굴곡에 모형이 적합되기 때문에 발생한다. => 과대적합  
+다르게 생각하면 오른쪽으로 갈수록 학습 세트(상승)와 검증 세트(하락)의 성능 차이가 점점 벌어지는 경우라고 볼 수 있다. 
+* 과소적합도 아니고 과대적합도 아닌 중간점은 교차검증 없이는 찾아내기 무척 어렵다. 
+
+#### 정규화
+하고자 하는 것 : 복잡도를 올리지 않으면서 최대한 모형을 학습 데이터에 맞춘다.  
+말하자면 모형 적합도와 복잡도 사이에 상반관계(trade-off)를 만들어서,  
+더 잘 맞는 더 복잡한 모형 vs. 덜 맞는 더 단순한 모형 사이에서 선택을 하는 것  
+이런 상반관계가 모형이 학습 데이터의 잡음에 맞춰지지 않도록 막음으로써 결과적으로 과대적합이 방지된다. 
+
+glmnet 패키지에는 정규화로 선형 모형을 적합시키는 glmnet 함수가 있다.  
+glmnet을 호출하면 가능한 정규화 전체 집합을 얻게 된다.  
+결과 목록 제일 윗부분은 가장 강한 정규화를, 가장 아랫부분은 가장 약한 정규화를 말한다. 
+```{r message=FALSE}
+x <- as.matrix(cbind(x,rev(x)))
+
+library('glmnet')
+
+res <- glmnet(x, y)
+head(data.frame(res[c("df", "dev.ratio", "lambda")])); tail(data.frame(res[c("df", "dev.ratio", "lambda")]))
+```
+
+결과 분석
+
+* Df는 0이 아닌 계수의 수를 뜻한다. 절편은 포함되지 않음
+* %Dev는 기본적으로 이 모형의 R^2 값이다.
+* Lambda는 가장 중요한 정보. 정규화 알고리즘의 인수로 모형이 얼마나 복잡해질 수 있는지 조정하는 역할 수행
+
+lambda :  
+람다가 매우 크면 모형의 복잡도에 크게 불이익을 준다는 뜻으로, 모든 계수가 0에 가까워지게 된다.  
+람다가 매우 작으면 복잡도가 늘어나는데 별 불이익을 주지 않는다는 뜻이다.  
+람다값은 줄이면 정규화가 점점 약해지다가 람다가 0이 되면 정규화 없이 lm을 이용해서 선형 회귀를 한 결과와 동일한 결과를 얻는다. 
+
+이 두 극단 사이 어느 람다 값에서 가장 좋은 모형이 나오게 되는지 찾기 위해 교차검증을 사용한다. 
+
+1. 일단 차수를 10과 같이 큰 값으로 설정하고  
+2. 람다 값을 변경하면서 모형을 학습 세트에 맞추고  
+3. 분리해 둔 검증 세트에 대해 모형의 성능을 평가한다.
+4. 가장 좋은 성능을 내는 Lambda 값 찾기
+```{r}
+library('glmnet')
+
+# 차수는 10으로 고정, 모든 람다값에 대해 모형을 학습 세트에 맞추고
+# (glmnet에서 한 번 적합 과정을 거치면 여러 람다값에 대한 모형 정보들이 저장된다)
+glmnet.fit <- with(training.df, glmnet(poly(X, degree = 10), Y))
+
+lambdas <- glmnet.fit$lambda
+
+performance <- data.frame()
+
+# 람다 값을 변경하면서 
+for (lambda in lambdas)
+{
+  # 검증 데이터 세트에 대해 모형의 성능 평가 
+  performance <- rbind(performance,
+                       data.frame(Lambda = lambda,
+                                  RMSE = rmse(test.y,
+                                              with(test.df,
+                                                   predict(glmnet.fit,
+                                                           poly(X, degree = 10),
+                                                           s = lambda)))))
+}
+
+# 그래프를 그려서 새로운 데이터에 대해 가장 좋은 성능을 보이는 람다값이 무엇인지 확인
+ggplot(performance, aes(x = Lambda, y = RMSE)) +
+  geom_point() +
+  geom_line()
+```
+
+람다가 0.05 근처에서 가장 좋은 성능 보인다.  
+그 값을 골라 모형을 전체 데이터세트에 대해 학습시키고 coef를 이용해서 정규화된 모형을 조사한다.  
+처음에 설정한 모형의 계수는 10개 였지만 정규화 결과 0이 아닌 계수가 3개로 나온다. 
+```{r}
+best.lambda <- with(performance, Lambda[which(RMSE == min(RMSE))])
+
+glmnet.fit <- with(df, glmnet(poly(X, degree = 10), Y))
+
+coef(glmnet.fit, s = best.lambda)
+```
+
+### 텍스트 회귀
+
+#### 선형 회귀 분석
+정규화를 활용할 만한 흥미로운 주제 중 하나는 텍스트를 이용해 연속적인 출력값을 예측하는 일이다.  
+(예를 들어 기업 공시 정보를 바탕으로 주가의 변동성을 예측하는 문제)  
+텍스트를 회귀 입력값으로 쓸 때는 관측(문서)에 비해 입력(단어)이 훨씬 많은 경우가 대부분  
+데이터 세트에서 행보다 열이 더 많기 때문에 정규화를 하지 않는 선형 회귀 모형은 항상 과대적합이 된다. 
+
+오라일리가 출판사의 베스트셀러 100위 책들의 상대적 인기도를 책 뒷 장의 소개글만으로 예측하는 문제를 다뤄보자.  
+
+1. oreilly.csv 파일을 읽어들여서 분석에 적당한 형태로 전처리 수행 
+```{r message=FALSE}
+ranks <- read.csv(file.path('data', 'oreilly.csv'),
+                  stringsAsFactors = FALSE)
+
+library('tm')
+
+documents <- data.frame(Text = ranks$Long.Desc.)
+row.names(documents) <- 1:nrow(documents)
+
+corpus <- Corpus(DataframeSource(documents))
+corpus <- tm_map(corpus, stripWhitespace)
+corpus <- tm_map(corpus,  content_transformer(tolower))
+corpus <- tm_map(corpus, removeWords, stopwords('english'))
+
+dtm <- DocumentTermMatrix(corpus)
+
+x <- as.matrix(dtm)
+y <- rev(1:100)
+```
+
+2. 람다값을 바꾸어 가며 분리한 검증 데이터에 대해 가장 좋은 결과가 나오는 값을 찾는다.  
+다양한 람다값을 설정하고 데이터를 학습 세트와 검증 세트로 50번 나누어 각 사례마다 모형의 성능을 평가한다. 
+```{r}
+performance <- data.frame()
+
+for (lambda in c(0.1, 0.25, 0.5, 1, 2, 5))
+{
+  for (i in 1:50)
+  {
+    indices <- sample(1:100, 80)
+    
+    training.x <- x[indices, ]
+    training.y <- y[indices]
+    
+    test.x <- x[-indices, ]
+    test.y <- y[-indices]
+    
+    glm.fit <- glmnet(training.x, training.y)
+    
+    predicted.y <- predict(glm.fit, test.x, s = lambda)
+    
+    rmse <- sqrt(mean((predicted.y - test.y) ^ 2))
+
+    performance <- rbind(performance,
+                         data.frame(Lambda = lambda,
+                                    Iteration = i,
+                                    RMSE = rmse))
+  }
+}
+```
+
+3. 시각화하여 어떤 모형이 가장 좋은지 비교해본다.
+```{r message=FALSE, warning=FALSE}
+library(Hmisc)
+
+ggplot(performance, aes(x = Lambda, y = RMSE)) +
+  stat_summary(fun.data = 'mean_cl_boot', geom = 'errorbar') +
+  stat_summary(fun.data = 'mean_cl_boot', geom = 'point') + ylim(20, 40)
+```
+
+결과 분석 : 실패!  
+람다값이 높아지면 모형 성능도 점점 좋아진다.  
+결국 절편뿐이 모형으로 수렴하게 되는데 절편뿐인 모형은 아무런 텍스트 데이터도 사용하지 않는다.  
+간단히 말해 텍스트 회귀를 통해 아무런 신호도 찾지 못했다는 뜻이고 모델 검증 과정에서 모두 잡음으로 밝혀졌다.  
+=> 책 뒷 표지의 소개글을 어떻게 써야 책이 잘 팔릴지 알 수 없다는 뜻이다. 
+
+> 데이터 안에 답이 없을 수도 있다. 데이터가 있고 답을 찾고자 하는 열망이 있더라도  
+> 주어진 데이터에서 합리적인 답을 찾으리라는 보장은 없다.
+>                                                           - 존 튜키(John Tukey)
+
+#### 로지스틱 회귀 분석
+아직은 이 데이터를 포기하지 말고 회귀 문제를 분류 문제로 전환해보자.  
+문제를 더 간단히 바꾸어 수많은 순위 값 중에 하나를 예측하는 대신 어떤 책이 50위 안에 드는지를 예측해보자.  
+이 구분은 정말 범위가 넓고 단순하므로 작은 양의 데이터로도 쉽게 신호 추출이 될 것으로 예상된다.  
+
+사실 로지스틱 회귀는 한 항목이 두 분류 중에 하나에 속할 확률을 예측하는 일종의 회귀 알고리즘이다.  
+그런데 확률은 항상 0~1 사이 값이므로, 0.5를 문턱값으로 설정하면 로지스틱 회귀가 분류 알고리즘이 된다.  
+출력값이 0에서 1사이라는 사실을 제외하면 본질적으로 로지스틱 회귀는 선형 회귀와 동일하다.  
+유일한 차이점은 분류 예측을 하기 위해 출력에 문턱값을 적용한다는 점이다. 
+
+데이터 세트에 분류 레이블을 추가하고 로지스틱 회귀를 적용한 결과를 확인하자.  
+선형 회귀와 차이점은 오로지 family라는 추가 인수를 설정했다는 점으로 이 인수는 오차 종류를 조정한다.  
+선형회귀는 오차가 가우스분포를 따른다고 가정하는 반면, 로지스틱 회귀는 이항분포(binomial distribution)라고 가정한다.  
+이항 분포는 오차가 모두 0 아니면 1이 되며, 이는 분류에 적합한 특성이다. (참고 2)
+```{r}
+y <- rep(c(1, 0), each = 50)
+
+regularized.fit <- glmnet(x, y, family = 'binomial')
+```
+
+predict 함수를 이용해서 모형의 예측 결과가 어떤지 확인하자.  
+예측값이 0이나 1이기를 바랐지만, 출력 결과를 보면 양수와 음수가 섞여있다. 
+```{r}
+predict(regularized.fit, newx = x, s = 0.001)
+```
+
+분류문제로 바꾸기 위해 가능한 2가지 작업
+
+1. 문턱값을 0으로 하고 ifelse 함수로 0/1 예측치를 만드는 방법  
+```{r}
+res <- ifelse(predict(regularized.fit, newx = x, s = 0.001) > 0, 1, 0)
+head(res); tail(res)
+```
+2. 예측값을 해석하기 더 쉬운 확률값으로 바꾸는 방법 (0.5를 문턱값으로 0/1 예측치 생성 작업 필요)  
+```{r message=FALSE}
+library('boot')
+
+# 로지스틱 회귀에서 출력을 확률로 바꾸려면, 로짓(logit) 역함수로 변환해줘야 한다.
+res <- inv.logit(predict(regularized.fit, newx = x, s = 0.001))
+head(res); tail(res)
+```
+
+이제 얼마나 잘 분류되는지 확인하자.  
+달라진 점은 얼마 없다. 
+
+* glmnet에서 이항오차를 쓴 점
+* 로지스틱 결과값을 0/1 예측치로 바꾸는 문턱값 설정
+* RMSE 대신 오차율을 모형 성능 측도로 사용한 점
+* 효율을 위해서 데이터 분리 루프와 람다 루프 순서 바꿈
+```{r warning=FALSE}
+set.seed(1)
+
+performance <- data.frame()
+
+for (i in 1:100)
+{
+  indices <- sample(1:100, 80)
+  
+  training.x <- x[indices, ]
+  training.y <- y[indices]
+  
+  test.x <- x[-indices, ]
+  test.y <- y[-indices]
+  
+  for (lambda in c(0.0001, 0.001, 0.0025, 0.005, 0.01, 0.025, 0.5, 0.1))
+  {
+    glm.fit <- glmnet(training.x, training.y, family = 'binomial')
+    
+    predicted.y <- ifelse(predict(glm.fit, test.x, s = lambda) > 0, 1, 0)
+    
+    error.rate <- mean(predicted.y != test.y)
+
+    performance <- rbind(performance,
+                         data.frame(Lambda = lambda,
+                                    Iteration = i,
+                                    ErrorRate = error.rate))
+  }
+}
+
+# 람다에 따른 오차율을 그래프로 그려보자.
+ggplot(performance, aes(x = Lambda, y = ErrorRate)) +
+  stat_summary(fun.data = 'mean_cl_boot', geom = 'errorbar') +
+  stat_summary(fun.data = 'mean_cl_boot', geom = 'point') +
+  scale_x_log10() + ylim(0.2, 0.8)
+```
+
+잘 바꿨음.  
+람다값에 따라 50위권 내 책을 예측하는 성능이 우연보다 더 나은 경우가 있다.  
+이 데이터의 분량이 정교한 순위 예측 회귀모형에는 충분하지 않지만,  
+50위권 내 여부에 따라 분류하는 더 단순한 이항모형에는 충분하다는 게 밝혀졌다. 
+
+교훈 :  
+* 정규화로 더 좋은 성능의 더 단순한 모형 찾음  
+* 회귀 모형에 더 단순한 이항분리를 사용하여 더 좋은 성능 보임
+
+![less is more](http://roneilkintanar.com/wp-content/uploads/2013/12/less-is-more.jpg)
+
+
+
+
+
+
+
+
+
+
+
+------
+
+'''참고 1'''
+poly 함수가 다항식을 만들 때 어떻게 직교성을 부여하는지?  
+```{r}
+opar <- par ( mfrow = c (1 , 2) )
+
+# x <- seq(0, 1, by = 0.01)
+# z <- sin(2 * pi * x) + rnorm(length(x), 0, 0.1)
+z <- seq(1, 7, by=0.1)
+plot(z, type="l")
+lines(z^2)
+lines(z^3)
+
+pz <- poly(z, degree=3)
+plot(pz[,1], type="l")
+lines(pz[,2])
+lines(pz[,3])
+```
+
+직교성 처리하지 않게 하려면 ```poly(z, degree=3, raw=T)```와 같이 raw=TRUE 옵션을 주면 된다. 
+
+poly 관련 링크들 참조
+
+* http://stackoverflow.com/questions/17457884/using-lmpoly-to-get-formula-coeff
+* http://stackoverflow.com/questions/3822535/fitting-polynomial-model-to-data-in-r
+* http://mathoverflow.net/questions/38864/visualizing-orthogonal-polynomials
+* http://stats.stackexchange.com/questions/31204/why-do-i-get-wildly-different-results-for-polyraw-t-vs-poly
+
+'''참고 2'''
+어떤 시행을 했을 때 특정 사건이 일어날 확률을 p, 일어나지 않을 확률을 1-p라고 하고 각각의 시행들이 독립적이라고 하자.  
+시행을 n번 반복했을 때 그 사건이 k번 일어날 확률은 $\binom{n}{k}p^k(1-p)^{n-k}$이 되며 이 확률분포를 이항분포라 한다. 
+
+
+
+
+
+
+
+
+
+
