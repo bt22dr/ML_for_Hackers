@@ -1,0 +1,368 @@
+---
+title: "최적화"
+output: html_document
+---
+```{r echo=FALSE}
+library(ggplot2)
+```
+
+### 최적화에 대한 소개 ###
+지금까지 소개한 내용은 알고리즘 내부를 블랙박스처럼 처리하여 입력과 출력에만 초점을 맞춰 설명했고,  
+단순히 기계학습 알고리즘을 라이브러리 함수처럼 활용해서 예측 작업을 했다.
+
+이 장에서 다룰 내용 개관
+
+* 단순 선형 회귀 모형을 예측 변수 하나에 적합(fitting)시키는 함수 작성
+* 최적화 문제에서 모형을 데이터에 적합시키는 과정 살펴보기
+* 사례분석. 암호화된 문서를 해독하는 간단한 해독기 만들기
+
+최적화 문제 :  
+기계의 손잡이를 돌려서 설정을 바꾸어 가며 기계가 얼마나 잘 작동하는지 측정하는 방법이 있다고 하자.  
+기계의 성능을 측정하는 어떤 값이 최대가 되는 점을 최적(optimum)점이라고 하고,  
+그 점에 도달하는 것을 최적화(optimization)이라고 한다. ex) 여자 꼬시기
+
+키와 몸무게 데이터로 선형 회귀 함수를 직접 작성해보자.  
+몸무게가 키의 함수로 예측될 수 있다고 가정하면 다음과 같은 선형 함수를 만들 수 있다. 
+```{r}
+height.to.weight <- function(height, a, b)
+{
+  return(a + b * height)
+}
+```
+
+위 함수에서 어떤 a와 b 값이 최적인지 어떻게 결정할 수 있을까? 여기서 최적화가 등장한다.  
+
+1. 먼저 키 데이터로 몸무게가 얼마나 잘 예측되는지 측정하는 값을 정의하고
+2. a와 b 값을 바꾸어가며 예측 성능이 최대가 되는 지점을 찾는다. 
+
+사실 lm에 필요한 기능이 다 있다. lm에는...
+
+* 최적화를 시킬 간단한 오차 함수(error function)가 있어서,
+* 일반 선형 회귀에만 동작하는 특수한 알고리즘으로 a와 b의 최적값을 찾는다. 
+
+```{r}
+heights.weights <- read.csv(file.path('data', '01_heights_weights_genders.csv'))
+coef(lm(Weight ~ Height, data = heights.weights))
+```
+
+**오차함수**  
+lm은 제곱 오차(squared error)에 기반한 오차 측도를 사용하는데 간단히 설명하면 아래와 같다. 
+
+1. a와 b의 값을 고정한다. 
+2. 주어진 키 값에 대해서 몸무게를 추정한다. 
+3. 실제 몸무게에서 예측 몸무게를 뺀다. 이 값을 오차로 한다. 
+4. 오차를 제곱한다. 
+5. 모든 값에 대해 제곱한 오차를 더해서 제곱 오차 총합을 구한다. 
+
+이 방법대로 구현된 코드를 보자. 
+```{r}
+squared.error <- function(heights.weights, a, b)
+{
+  predictions <- with(heights.weights, height.to.weight(Height, a, b))
+  errors <- with(heights.weights, Weight - predictions)
+  return(sum(errors ^ 2))
+}
+```
+
+몇 가지 a와 b의 값에 대한 squared.error를 계산해보면  
+특정 a와 b값에 대해서는 제곱 오차가 훨씬 더 낮음을 알 수 있다.  
+이 말은 곧 예측 능력을 말해주는 의미 있는 오차 함수가 있으므로 최적의 a와 b 값을 찾을 차례라는 뜻.  
+최대화나 최소화를 할 측도를 설정하는 일이 바로 최적화 문제의 시작이 된다.  
+이 측도는 보통 목적 함수(objective function)이라고 불린다.  
+=> 최적화 문제 : 목적 함수를 가능한 가장 작거나 크게 만드는 최적의 a, b 값을 구하는 문제 
+
+최적값을 구하는 방법
+
+* 격자 검색(grid search)
+* optim 함수 사용
+
+**격자 검색**  
+a, b 값의 범위를 충분히 크게 설정하여 모든 경우에 대한 squared.error를 구한 후에  
+가장 작은 squared.error 값을 산출하는 a, b 쌍을 골라내는 방식
+```{r}
+for (a in seq(-1, 1, by = 1))
+{
+  for (b in seq(-1, 1, by = 1))
+  {
+    print(squared.error(heights.weights, a, b))
+  }
+}
+```
+
+문제점 : 검색한 격자상에서는 항상 최적 값을 얻게 되므로 비합리적이지는 않지만 심각한 문제 몇 가지가 있다. 
+
+* 격자의 간격 : 올바른 해상도는 무엇인지? 질문에 답하는 것은 격자의 간격을 구하는 또 다른 최적화 문제가 된다. 
+* 차원의 저주(Curse of Dimensionality) : 변수가 100개고 변수당 10개의 점을 계산하는 경우의 수는 10^100개나 된다. 
+
+수백 또는 수천 개의 입력값에 대해 선형 회귀를 한다면 격자 검색은 적당치 않다. 그렇다면 뭘 할 수 있을까?  
+=> optim 함수로 최적화 수행. 
+
+optim 함수의 인자는 아래와 같다.
+
+* 최적화의 시작점 수치벡터 : a와 b의 기본값으로 c(0, 0) 벡터를 전달
+* x라는 벡터를 인수로 받는 함수 : 오차 함수를 x만 익명으로 받는 익명 함수로 감싸서 전달
+
+```{r}
+optim(c(0, 0),
+      function (x)
+      {
+        squared.error(heights.weights, x[1], x[2])
+      })
+```
+
+optim 함수의 수행 결과 
+
+* par (parameter) : lm으로 구한 값과 매우 비슷한 것을 확인할 수 있다.  
+lm은 optim 코드보다 더 자세한 선형 회귀 알고리즘을 쓰므로 결과도 더 정밀하다.  
+직접 자신의 문제를 푼다면 선형 회귀 방법 대신 다른 모형을 쓸 수도 있으므로 optim을 쓰는 편이 낫다.
+* value : optim에서 최적으로 나온 모수에서의 제곱 오차 값
+* convergence : optim이 찾은 변수가 최적 값인지 아닌지 알려주는 값 (제대로 계산됐다면 이 값은 0이 된다)
+
+optim의 상세는 최적화에 도움이 되는 수많은 미적분학 개념에 기반한 복잡한 내용이므로 스킵  
+하지만 optim이 일반적으로 하는 일을 시각적으로 이해하기는 매우 쉽다. 
+
+b값이 0으로 고정되었을 때 최적의 a값을 찾는다고 가정해보자. 
+```{r}
+a.error <- function(a)
+{
+  return(squared.error(heights.weights, a, 0))
+}
+```
+
+최적의 a값이 있는지 이해하려면 curve 함수를 이용해서 여러 x값에 대해 a.error를 그래프로 그려본다. 
+```{r}
+curve(sapply(x, function (a) {a.error(a)}), from = -1000, to = 1000)
+```
+
+전역 최적점(global optimum)이 존재한다.
+
+이 경우 optim은 제곱 오차 함수의 모양을 활용해서  
+ - 특정 a값에서의 오차를 계산하고  
+ - 다음으로 진행할 방향을 알아내게 된다.  
+ 이렇게 optim은 전체적인 구조에 대한 지역적 정보를 알아내서 매우 빠르게 최적점을 찾아낸다. 
+
+a를 고정하고 b를 바꿀 때 오차 함수가 어떻게 반응하는지도 살펴보자.
+```{r}
+b.error <- function(b)
+{
+  return(squared.error(heights.weights, 0, b))
+}
+
+curve(sapply(x, function (b) {b.error(b)}), from = -1000, to = 1000)
+```
+
+a와 b 모두 전역 최적점이 있다는 사실은 optim으로 오차 함수를 최소화하는  
+하나의 최적 a, b 값을 찾는게 가능하다는 뜻이 된다.
+
+일반적인 경우에서도 이 방식은 지금 계산중인 어떤 점에 대한 정보만으로 주위 점을 추측하므로  
+즉, 점 주위 정보로 성능이 더 나아지는 방향으로 다음에 움직일 방향이 결정되는 적응식 방법을 사용하므로  
+격자검색보다 더 빠르고 효율적으로 최적점을 계산할 수 있다. 
+
+### 능선회귀(Ridge Regression) ###
+optim의 사용법을 알았으니 능선 회귀를 구현해보자.  
+
+일반 최소제곱 회귀와 능선 회귀의 차이점은  
+
+* 오차함수 : 회귀 계수의 크기도 오차 항의 일부로 간주한다
+* lambda : 과적합을 피하기 위해 a와 b값의 최소화와 제곱 오차 최소화 사이에 균형을 잡아주는 변수
+
+일단 lambda값이 정해지면, 능선 오차 함수를 다음과 같이 작성할 수 있다.  
+(제대로 된 lambda값은 교차검증법(cross-validation)으로 구할 수 있으며 여기서는 간단히 1이라 가정한다)
+```{r}
+ridge.error <- function(heights.weights, a, b, lambda)
+{
+  predictions <- with(heights.weights, height.to.weight(Height, a, b))
+  errors <- with(heights.weights, Weight - predictions)
+  return(sum(errors ^ 2) + lambda * (a ^ 2 + b ^ 2))
+}
+```
+
+일반 최소 제곱 문제와 마찬가지로 optim을 이용하면 쉽게 능선 회귀 문제를 풀 수 있다.  
+결과를 보면 lm으로 구했던 값보다 살짝 작은 값이 나온 것을 확인할 수 있다. 
+```{r}
+lambda <- 1
+
+optim(c(0, 0),
+      function (x)
+      {
+        ridge.error(heights.weights, x[1], x[2], lambda)
+      })
+```
+
+사실 좋은 예제는 아님 제대로 보려면 $x^2, x^3, ..., x^{14}$ 같은 다항식(polynomial)을 포함하는 예제가 좋다.  
+(TODO: 아래와 같은 데이터를 가정해보자.)
+```{r echo=FALSE, eval=FALSE}
+set.seed(1)
+
+x <- seq(0, 1, by = 0.01)
+y <- sin(2 * pi * x) + rnorm(length(x), 0, 0.1)
+
+df <- data.frame(X = x, Y = y)
+ggplot(df, aes(x = X, y = Y)) +
+  geom_point()
+
+poly.fit <- lm(Y ~ poly(X, degree = 25), data = df)
+df <- transform(df, PredictedY = predict(poly.fit))
+ggplot(df, aes(x = X, y = PredictedY)) +
+  geom_point() +
+  geom_line()
+
+
+
+
+
+my_data <- poly(df$X, degree = 25)
+
+predict_y <- function(x, param)
+{
+  return(param[1] + sum(param[2:length(param)] * x))
+}
+
+ridge.error <- function(data, param, lambda) {
+  predictions <- predict_y(data, param)
+  errors <- y - predictions
+  return(sum(errors ^ 2) + lambda * sum(param^2))
+}
+
+lambda <- 0.025
+
+par <- optim(rep(0, 26),
+      function (parma)
+      {
+        ridge.error(my_data, parma, lambda)
+      })$par
+
+
+my_y <- apply(my_data, 1, function(x) { predict_y(x, par) })
+df <- data.frame(x, my_y)
+
+ggplot(df, aes(x = x, y = my_y)) +
+  geom_point() +
+  geom_line()
+```
+
+오차 함수를 그려보면 일반 선형 회귀와 마찬가지로 능선 회귀에서도 optim이 잘 동작하는지 알 수 있다. 
+```{r}
+a.ridge.error <- function(a, lambda)
+{
+  return(ridge.error(heights.weights, a, 0, lambda))
+}
+curve(sapply(x, function (a) {a.ridge.error(a, lambda)}), from = -1000, to = 1000)
+
+b.ridge.error <- function(b, lambda)
+{
+  return(ridge.error(heights.weights, 0, b, lambda))
+}
+curve(sapply(x, function (b) {b.ridge.error(b, lambda)}), from = -1000, to = 1000)
+```
+
+optim 같은 함수를 써서 예측 오차 측도를 최적화하는 방법만 알아도 기계학습에 관한 여러 가지 작업이 가능하다.  
+다양한 오차 함수를 고안해서 자신만의 예제에 적용해보기를 권한다. 
+
+예를 들어, 아래와 같은 절대값 오차 함수를 시험해보면 어떨까?  
+미적분학 기법에 관한 이유 때문에 optim에서 이 오차항은 잘 동작하지 않는다. 
+```{r}
+absolute.error <- function(heights.weights, a, b)
+{
+  predictions <- with(heights.weights, height.to.weight(Height, a, b))
+  errors <- with(heights.weights, Weight - predictions)
+  return(sum(abs(errors)))
+}
+
+a.absolute.error <- function(a)
+{
+  return(absolute.error(heights.weights, a, 0))
+}
+
+curve(sapply(x, function (a) {a.absolute.error(a)}), from = -1000, to = 1000)
+```
+
+잘 동작하지 않는 이유를 시각적으로 개념만 설명하면... 
+절대값 오차 곡선이 제곱 오차나 능선 오차 곡선보다 훨씬 더 뾰족하다.  
+너무 뾰족한 모양이라 optim이 특정 점에서 진행 방향을 못 찾게 되고 최적점에도 도달하지 못한다.  
+즉, 꼭지점에서 미분이 불가능하기 때문에 기울기를 구할 수가 없고,  
+따라서 위치를 조금씩 바꾸면서 최적점을 탐색하는 방법을 쓸 수 없다는 말이다. 
+
+### 최적화로 암호 해독하기 ###
+회귀 모형 외에도 거의 대부분의 기계학습 알고리즘은 어떤 예측 오차 측도를 최소화하는 최적화 문제로 볼 수 있다.  
+확률적 최적화(stochastic optimization) : 가능한 범위 내에서 파라미터를 약감씩 무작위로 바꾸되,  
+오차 함수가 상승보다는 하락하는 경향이 되도록 방향을 잡아나가는 방법이다. 
+
+이러한 방법론은 모의 담금질(simulated annealing), 유전 알고리즘(genetic algorithm),  
+마르코프 연쇄 몬테 카를로 방법(Markov chain Monte Carlo, MCMC) 같은 유명한 최적화 알고리즘들과 연관이 있다. 
+
+여기서 암호 해독을 위해 사용할 알고리즘은 메트로폴리스 방법(Metropolis method)이다.  
+암호 해독은 optim 같은 발군의 알고리즘도 전혀 동작하지 못하는 예제이다. 
+
+문제 : 문자치환식 암호법으로 암호화된 문자열이 있을 때 원본을 해독하는 규칙은 어떻게 정해야 할까?
+(문자치환식 암호법, ROT13, 카이사르 암호법)  
+
+우선 카이사르 암호를 만들어보자.
+```{r}
+english.letters <- c('a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i', 'j', 'k',
+                     'l', 'm', 'n', 'o', 'p', 'q', 'r', 's', 't', 'u', 'v',
+                     'w', 'x', 'y', 'z')
+
+caesar.cipher <- list()
+
+inverse.caesar.cipher <- list()
+
+for (index in 1:length(english.letters))
+{
+  caesar.cipher[[english.letters[index]]] <- english.letters[index %% 26 + 1]
+  inverse.caesar.cipher[[english.letters[index %% 26 + 1]]] <- english.letters[index]
+}
+
+print(head(caesar.cipher))
+```
+
+암호를 구현했으므로 문자열을 암호로 바꾸는 함수를 만들자. 
+```{r}
+apply.cipher.to.string <- function(string, cipher)
+{
+  output <- ''
+
+  for (i in 1:nchar(string))
+  {
+  output <- paste(output, cipher[[substr(string, i, i)]], sep = '')
+  }
+  
+  return(output)
+}
+
+apply.cipher.to.text <- function(text, cipher)
+{
+  output <- c()
+  
+  for (string in text)
+  {
+    output <- c(output, apply.cipher.to.string(string, cipher))
+  }
+  
+  return(output)
+}
+
+apply.cipher.to.text(c('sample', 'text'), caesar.cipher)
+```
+
+기본 도구를 만들었으니 암호 해독 문제를 몇 가지 부분으로 나눠서 풀어보자.
+
+1. 주어진 해독 규칙의 성능을 갖
+
+
+```{r}
+
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
