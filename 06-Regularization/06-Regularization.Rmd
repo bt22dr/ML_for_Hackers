@@ -346,7 +346,7 @@ ggplot(performance, aes(x = Lambda, y = RMSE)) +
   geom_line()
 ```
 
-람다가 0.05 근처에서 가장 좋은 성능 보인다.  
+람다가 0.025 근처에서 가장 좋은 성능 보인다.  
 그 값을 골라 모형을 전체 데이터세트에 대해 학습시키고 coef를 이용해서 정규화된 모형을 조사한다.  
 처음에 설정한 모형의 계수는 10개 였지만 정규화 결과 0이 아닌 계수가 3개로 나온다. 
 ```{r}
@@ -355,6 +355,37 @@ best.lambda <- with(performance, Lambda[which(RMSE == min(RMSE))])
 glmnet.fit <- with(df, glmnet(poly(X, degree = 10), Y))
 
 coef(glmnet.fit, s = best.lambda)
+```
+
+그림으로 람다의 효과를 이해해보자.
+```{r}
+set.seed(1)
+x <- seq(0, 1, by = 0.01)
+y <- sin(2 * pi * x) + rnorm(length(x), 0, 0.1)
+
+df <- data.frame(X = x, Y = y)
+
+data <- with(df, poly(X, degree = 25))
+glmnet.fit <- with(df, glmnet(data, Y))
+
+y0 <- predict(glmnet.fit, data, s=0.0)
+y1 <- predict(glmnet.fit, data, s=0.025)
+y2 <- predict(glmnet.fit, data, s=0.1)
+y3 <- predict(glmnet.fit, data, s=10)
+
+df <- transform(df, P_zero = as.numeric(predict(glmnet.fit, data, s=0.000)))
+df <- transform(df, P_min  = as.numeric(predict(glmnet.fit, data, s=0.008)))
+df <- transform(df, P_best = as.numeric(predict(glmnet.fit, data, s=0.025)))
+df <- transform(df, P_large = as.numeric(predict(glmnet.fit, data, s=10)))
+
+ggplot(df, aes(x = X, y = P_zero)) + geom_point() + geom_line() + 
+  geom_line(aes(x = X, y = P_best), colour="red") + 
+  geom_line(aes(x = X, y = P_min), colour="green") +
+  geom_line(aes(x = X, y = P_large), colour="blue")
+# ggplot(df, aes(x = X, y = P_zero)) + geom_point() + geom_line()
+# ggplot(df, aes(x = X, y = P_min)) + geom_point() + geom_line()
+# ggplot(df, aes(x = X, y = P_best)) + geom_point() + geom_line()
+# ggplot(df, aes(x = X, y = P_large)) + geom_point() + geom_line()
 ```
 
 ### 텍스트 회귀
