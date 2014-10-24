@@ -531,7 +531,7 @@ cipher <- generate.random.cipher()
 
 # 50,000번 반복하며 result를 구함
 results <- data.frame()
-number.of.iterations <- 500
+number.of.iterations <- 1000
 for (iteration in 1:number.of.iterations)
 {
   log.probability <- log.probability.of.text(encrypted.text,
@@ -555,12 +555,30 @@ for (iteration in 1:number.of.iterations)
 }
 
 head(results)
+tail(results)
 
 write.table(results,
             file = file.path('data/results.tsv'),
             row.names = FALSE,
             sep = '\t')
+
+ggplot(results, aes(x=Iteration, y=LogProbability)) + geom_line()
 ```
+
+6. 결과 분석  
+45,000번째 단계부터 정답에 가까운 결과가 나오지만 최종적으로 정답에 도달하지는 못했다.  
+또한 결과를 자세히 살펴보면 어느 단계에서 정답이 나왔지만 그냥 넘어가버렸음을 알 수 있다.  
+이는 목적 함수가 각각의 단어들이 자주 쓰이는 단어인지만 평가하기 때문에 발생하는 문제이다.  
+어떤 규칙이 출현 빈도가 높은 단어들을 골라낸다면, 문법이 틀리고 의미가 일관성이 없더라도  
+그 규칙이 채택되는 경향이 있는데 bi-gram같은 정보를 더 추가한다면 문제를 피해갈 수 있다. 
+
+메트로폴리스 알고리즘은 무작위로 최적화하는 방법이라는 점 때문에 나타나는 꽤 복잡한 문제들이 있다. 
+나쁜 종자값에서 시작하면 엄청난 계산을 해야 올바른 규칙을 찾게 될지도 모른다.  
+또한, 좋은 규칙에서 금방 다음으로 넘어가는 성질이 있다는 점이다.  
+이는 비탐욕적 알고리즘의 특성으로 계산과정을 장시간 추적해보면 원하던 답을 지나치는 경우를 자주 볼 수 있다. 
+
+이런 무작위 움직임을 다루는 방법 중에 잘 알려진 방법으로는 모의 담금질이라는 최적화 기법이 있다. 
+이 방법은 비탐욕적인 규칙 변경의 정도를 점점 더 줄이는 방법이다. 
 
 
 
