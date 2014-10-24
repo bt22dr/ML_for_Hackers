@@ -347,12 +347,226 @@ apply.cipher.to.text(c('sample', 'text'), caesar.cipher)
 
 기본 도구를 만들었으니 암호 해독 문제를 몇 가지 부분으로 나눠서 풀어보자.
 
-1. 주어진 해독 규칙의 성능을 갖
+1. 주어진 해독 규칙의 성능을 평가하는 측도를 정의한다. 
+2. 현재 가장 좋은 성능의 규칙을 무작위로 바꾸어 새로운 해독 규칙을 생성하는 알고리즘 만든다.
+3. 그 해독 규칙 중에 더 나은 성능을 보이는 쪽으로 이동하는 알고리즘을 정의한다. 
 
+##### 1. 해독 규칙의 성능을 측정하는 법 구현 #####
+문자치환법으로 암호화된 문서 조각 "wfoj wjej wjdj"이 있다고 가정해보자. (veni vidi vici)  
+여기서 사용할 접근법은 암호화된 메시지가 일반 영어로 바뀐다면 그 규칙이 좋다고 말하는것.  
+예를 들어, A와 B라는 해독 규칙을 적용한 메시지가 아래와 같다면 A가 더 낫다는게 뚜렷하다. 
 
+* decrypt(T, A) = xgpk xkfk xkek
+* decrypt(T, B) = veni vidi vici
+
+이와 같은 인간의 직관을 컴퓨터가 실행하는 자동 프로그램으로 바꾸기 위해서  
+어휘별로 출현 확률을 기록한 데이터베이스를 이용하려 한다. (존재하지 않는 단어는 epsilon으로)  
+해독된 문서에 있는 모든 단어의 확률을 어휘 데이터베이스에서 찾아 곱한 값을  
+전체 문서의 확률 추정값으로 하고, 그 값으로 우선순위를 매길 수 있다.
+
+어휘 데이터베이스로 해독된 문서의 확률을 계산하는 식으로 특정 해독 규칙에 대한 오차 측도를 만들 수 있고,  
+오차 함수가 생겼으니 암호 해독 문제는 전적으로 최적화 문제로 바뀌게 된다. 
+
+하지만 확률이 가장 높은 해독 규칙을 찾는 문제는 optim으로 최적화하는 종류의 문제와는 거리가 멀다.  
+해독 규칙은 그래프로 그리지 못하기 때문에 매끄러운 곡선을 이용해 더 나은 규칙을 찾는 방식은 적용 불가능.  
+이 문제를 풀려면 완전히 새로운 최적화 방법이 필요 ==> 메트로폴리스 알고리즘
+
+메트로폴리스 알고리즘  
+
+* 기본 개념 : 임의의 해독 규칙에서 시작해서 반복적으로 개선하면서 최종적으로 그럴듯한 해답을 얻는 방식  
+* 구현 : 완전히 임의의 규칙에서부터 개선해나가는 연산을 아주 많은 횟수로(ex. 50,000번) 반복한다. 
+* 특징 : 얼마나 반복해야 원하는 결과가 나올지는 보장할 수 없지만,  
+각 단계마다 더 나은 규칙을 찾아가는 경향이 있으므로 연산을 반복하면 마지막에는 적당한 결과를 얻게 된다. 
+* 단점 : 상당한 계산 시간이 지난 후에도 해답이 나왔는지 확신 못함.  
+게다가 기다리는 시간 동안에 알고리즘이 정답을 찾아가고 있다고 말하기도 어렵다. 
+
+##### 새로운 생성 규칙 생성 알고리즘 #####
+현재 규칙에서 한 문자를 무작위로 골라서 문자치환 규칙에 따라 자동으로 선택되는 다른 문자와 바꿔주는 과정  
+단순한 접근 : 해독 문서의 확률이 증가할 때만 새로운 규칙을 채택하도록 한다.  
+이러한 탐욕적 최적화(greedy optimization) 방법을 쓰면 좋지 않은 규칙에만 묶이게 되는 경향이 있으므로  
+다음과 같이 원 규칙 A와 새로운 규칙 B중에 하나를 선택하는 비탐욕정 방법을 사용한다.  
+
+* 규칙 B로 해독된 문서의 확률이 규칙 A로 해독된 문서의 확률보다 크면 A를 B로 바꾼다.  
+* 규칙 B로 해독된 문서의 확률이 규칙 A로 해독된 문서의 확률보다 작아도 가끔씩 A를 B로 바꾸어 준다. 
+
+규칙 변경 함수의 코드는 아래와 같다. 
 ```{r}
+generate.random.cipher <- function()
+{
+  cipher <- list()
+  
+  inputs <- english.letters
+  
+  outputs <- english.letters[sample(1:length(english.letters), length(english.letters))]
+  
+  for (index in 1:length(english.letters))
+  {
+    cipher[[inputs[index]]] <- outputs[index]
+  }
+  
+  return(cipher)
+}
 
+modify.cipher <- function(cipher, input, output)
+{
+  new.cipher <- cipher
+  
+  new.cipher[[input]] <- output
+  
+  old.output <- cipher[[input]]
+  
+  collateral.input <- names(which(sapply(names(cipher),
+                                         function (key) {cipher[[key]]}) == output))
+  
+  new.cipher[[collateral.input]] <- old.output
+  
+  return(new.cipher)
+}
+
+propose.modified.cipher <- function(cipher)
+{
+  input <- sample(names(cipher), 1)
+  
+  output <- sample(english.letters, 1)
+  
+  return(modify.cipher(cipher, input, output))
+}
 ```
+
+앞에서 소개한 두 가지 코드(규칙 변경 함수, 새로운 규칙 채택 과정)를 조합하면  
+현재 규칙보다 확실히 좋지 않은 규칙들을 탐색하느라 시간을 낭비하는 것을 막아주면서도  
+최적화 접근법의 탐욕적 특성을 완화시켜 준다. 
+
+실질적인 작업을 시작해보자.  
+1. 위키백과 문서에서 얼마나 자주 나타나는지 기록한 어휘 데이터베이스 로드하고  
+간단한 단어들의 출현 빈도를 확인해보자.
+```{r}
+load(file.path('data', 'lexical_database.Rdata'))
+
+lexical.database[['a']]
+lexical.database[['the']]
+lexical.database[['he']]
+lexical.database[['she']]
+lexical.database[['data']]
+```
+
+2. 문서의 확률을 계산할 방법에 대한 코드 작성. 개별 단어들에 대한 확률을 구하는 함수이다. 
+```{r}
+one.gram.probability <- function(one.gram, lexical.database = list())
+{
+  lexical.probability <- lexical.database[[one.gram]]
+  
+  if (is.null(lexical.probability) || is.na(lexical.probability))
+  {
+  return(.Machine$double.eps) # 존재하지 않는 단어에 대해서는 epsilon을 반환
+  }
+  else
+  {
+  return(lexical.probability)
+  }
+}
+```
+
+3. 전체 문서의 확률을 계산하는 함수 작성.  
+부동소수점 연산 정밀도에 한계가 있어서 확률의 다중 곱을 계산하면 수치가 불안정해진다.  
+여기서는 각 단어의 로그 확률을 더해서 문서의 로그 확률을 계산하는 방법을 쓴다. 
+```{r}
+log.probability.of.text <- function(text, cipher, lexical.database = list())
+{
+  log.probability <- 0.0
+  
+  for (string in text)
+  {
+    decrypted.string <- apply.cipher.to.string(string, cipher)
+    log.probability <- log.probability +
+    log(one.gram.probability(decrypted.string, lexical.database))
+  }
+  
+  return(log.probability)
+}
+```
+
+4. 메트로폴리스 알고리즘의 한 단계를 계산하는 함수 작성. 
+```{r}
+metropolis.step <- function(text, cipher, lexical.database = list())
+{
+  proposed.cipher <- propose.modified.cipher(cipher)
+  
+  lp1 <- log.probability.of.text(text, cipher, lexical.database)
+  lp2 <- log.probability.of.text(text, proposed.cipher, lexical.database)
+  
+  if (lp2 > lp1)
+  {
+    return(proposed.cipher)
+  }
+  else
+  {
+    a <- exp(lp2 - lp1)
+    x <- runif(1)
+    
+    if (x < a)
+    {
+      return(proposed.cipher)
+    }
+    else
+    {
+      return(cipher)
+    }
+  }
+}
+```
+
+5. 문장 하나를 정해서 메트로 폴리스 알고리즘을 50,000번 수행하는 과정이 어떻게 작동하는지 살펴보자.  
+각 단계마다 해독된 문장의 로그확률, 해독 내용, 제대로 해석했는지 나타내는 가변수를 기록한다. 
+```{r}
+# 주어진 문장을 하나의 문자형 벡터로 만든다
+decrypted.text <- c('here', 'is', 'some', 'sample', 'text')
+
+# 카이사르 암호법으로 해당 문장을 암호화
+encrypted.text <- apply.cipher.to.text(decrypted.text, caesar.cipher)
+
+# 무작위로 해독 규칙을 만든 후 
+set.seed(1)
+cipher <- generate.random.cipher()
+
+# 50,000번 반복하며 result를 구함
+results <- data.frame()
+number.of.iterations <- 500
+for (iteration in 1:number.of.iterations)
+{
+  log.probability <- log.probability.of.text(encrypted.text,
+                                             cipher,
+                                             lexical.database)
+  
+  current.decrypted.text <- paste(apply.cipher.to.text(encrypted.text,
+                                                       cipher),
+                                  collapse = ' ')
+  
+  correct.text <- as.numeric(current.decrypted.text == paste(decrypted.text,
+                                                             collapse = ' '))
+
+  results <- rbind(results,
+                   data.frame(Iteration = iteration,
+                              LogProbability = log.probability,
+                              CurrentDecryptedText = current.decrypted.text,
+                              CorrectText = correct.text))
+  
+  cipher <- metropolis.step(encrypted.text, cipher, lexical.database)
+}
+
+head(results)
+
+write.table(results,
+            file = file.path('data/results.tsv'),
+            row.names = FALSE,
+            sep = '\t')
+```
+
+
+
+
+
+
 
 
 
